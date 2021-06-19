@@ -6,6 +6,8 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -346,15 +348,21 @@ func TestDialError(t *testing.T) {
 }
 
 func TestConcurrency(t *testing.T) {
-	testOutput(t, "test_key:1|c\ntest_key:1|c\ntest_key:1|c", func(c *Client) {
-		var wg sync.WaitGroup
-		wg.Add(1)
-		c.Increment(testKey)
-		go func() {
-			c.Increment(testKey)
-			wg.Done()
-		}()
-		c.Increment(testKey)
+	testKeys := []string{"test_key1", "test_key", "test_key_2", "test_key5", "test_key_03", "test_key_004"}
+	testOutputConcurrent(t, testKeys, func(c *Client) {
+		n := 6
+		wg := &sync.WaitGroup{}
+		wg.Add(n)
+		starter := make(chan struct{})
+
+		for j := 0; j < n; j++ {
+			go func(i int) {
+				<-starter
+				c.Increment(testKeys[i])
+				wg.Done()
+			}(j)
+		}
+		close(starter)
 		wg.Wait()
 	})
 }
@@ -416,6 +424,19 @@ func testOutput(t *testing.T, want string, f func(*Client), options ...Option) {
 
 		got := getOutput(c)
 		if got != want {
+			t.Errorf("Invalid output, got:\n%q\nwant:\n%q", got, want)
+		}
+	}, options...)
+}
+
+func testOutputConcurrent(t *testing.T, want []string, f func(*Client), options ...Option) {
+	testClient(t, func(c *Client) {
+		f(c)
+		c.Close()
+
+		got := strings.Split(getOutput(c), "\n")
+
+		if reflect.DeepEqual(got, want) {
 			t.Errorf("Invalid output, got:\n%q\nwant:\n%q", got, want)
 		}
 	}, options...)

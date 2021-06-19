@@ -120,7 +120,7 @@ func (c *conn) gauge(prefix, bucket string, value interface{}, tags string) {
 
 func (c *conn) appendGauge(value interface{}, tags string) {
 	c.appendNumber(value)
-	c.appendType("g")
+	c.appendType(GAUGE_S)
 	c.closeMetric(tags)
 }
 
@@ -129,7 +129,7 @@ func (c *conn) unique(prefix, bucket string, value string, tags string) {
 	l := len(c.buf)
 	c.appendBucket(prefix, bucket, tags)
 	c.appendString(value)
-	c.appendType("s")
+	c.appendType(SET_S)
 	c.closeMetric(tags)
 	c.flushIfBufferFull(l)
 	c.mu.Unlock()
@@ -212,7 +212,6 @@ func (c *conn) appendBucket(prefix, bucket string, tags string) {
 }
 
 func (c *conn) appendType(t string) {
-	c.appendByte('|')
 	c.appendString(t)
 }
 

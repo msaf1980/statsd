@@ -76,7 +76,7 @@ func (c *Client) Count(bucket string, n interface{}) {
 	if c.skip() {
 		return
 	}
-	c.conn.metric(c.prefix, bucket, n, "c", c.rate, c.tags)
+	c.conn.metric(c.prefix, bucket, n, COUNT_S, c.rate, c.tags)
 }
 
 func (c *Client) skip() bool {
@@ -101,7 +101,7 @@ func (c *Client) Timing(bucket string, value interface{}) {
 	if c.skip() {
 		return
 	}
-	c.conn.metric(c.prefix, bucket, value, "ms", c.rate, c.tags)
+	c.conn.metric(c.prefix, bucket, value, TIMINGS_S, c.rate, c.tags)
 }
 
 // Histogram sends an histogram value to a bucket.
@@ -109,7 +109,7 @@ func (c *Client) Histogram(bucket string, value interface{}) {
 	if c.skip() {
 		return
 	}
-	c.conn.metric(c.prefix, bucket, value, "h", c.rate, c.tags)
+	c.conn.metric(c.prefix, bucket, value, HISTOGRAM_S, c.rate, c.tags)
 }
 
 // A Timing is an helper object that eases sending timing values.

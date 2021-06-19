@@ -72,11 +72,13 @@ func (c *Client) Clone(opts ...Option) *Client {
 }
 
 // Count adds n to bucket.
-func (c *Client) Count(bucket string, n interface{}) {
+func (c *Client) Count(bucket string, value interface{}) error {
 	if c.skip() {
-		return
+		return nil
 	}
-	c.conn.metric(c.prefix, bucket, n, COUNT_S, c.rate, c.tags)
+	//c.conn.metric(c.prefix, bucket, n, COUNT_S, c.rate, c.tags)
+	m := &Metric{Type: COUNT, Prefix: c.prefix, Bucket: bucket, Tags: c.tags, Value: value, Rate: c.rate}
+	return c.conn.Put(m)
 }
 
 func (c *Client) skip() bool {
@@ -84,32 +86,38 @@ func (c *Client) skip() bool {
 }
 
 // Increment increment the given bucket. It is equivalent to Count(bucket, 1).
-func (c *Client) Increment(bucket string) {
-	c.Count(bucket, 1)
+func (c *Client) Increment(bucket string) error {
+	return c.Count(bucket, 1)
 }
 
 // Gauge records an absolute value for the given bucket.
-func (c *Client) Gauge(bucket string, value interface{}) {
+func (c *Client) Gauge(bucket string, value interface{}) error {
 	if c.skip() {
-		return
+		return nil
 	}
-	c.conn.gauge(c.prefix, bucket, value, c.tags)
+	//c.conn.gauge(c.prefix, bucket, value, c.tags)
+	m := &Metric{Type: GAUGE, Prefix: c.prefix, Bucket: bucket, Tags: c.tags, Value: value}
+	return c.conn.Put(m)
 }
 
 // Timing sends a timing value to a bucket.
-func (c *Client) Timing(bucket string, value interface{}) {
+func (c *Client) Timing(bucket string, value interface{}) error {
 	if c.skip() {
-		return
+		return nil
 	}
-	c.conn.metric(c.prefix, bucket, value, TIMINGS_S, c.rate, c.tags)
+	//c.conn.metric(c.prefix, bucket, value, TIMINGS_S, c.rate, c.tags)
+	m := &Metric{Type: TIMINGS, Prefix: c.prefix, Bucket: bucket, Tags: c.tags, Value: value, Rate: c.rate}
+	return c.conn.Put(m)
 }
 
 // Histogram sends an histogram value to a bucket.
-func (c *Client) Histogram(bucket string, value interface{}) {
+func (c *Client) Histogram(bucket string, value interface{}) error {
 	if c.skip() {
-		return
+		return nil
 	}
-	c.conn.metric(c.prefix, bucket, value, HISTOGRAM_S, c.rate, c.tags)
+	//c.conn.metric(c.prefix, bucket, value, HISTOGRAM_S, c.rate, c.tags)
+	m := &Metric{Type: HISTOGRAM, Prefix: c.prefix, Bucket: bucket, Tags: c.tags, Value: value, Rate: c.rate}
+	return c.conn.Put(m)
 }
 
 // A Timing is an helper object that eases sending timing values.
@@ -141,14 +149,11 @@ func (c *Client) Unique(bucket string, value string) {
 	c.conn.unique(c.prefix, bucket, value, c.tags)
 }
 
-// Flush flushes the Client's buffer.
-func (c *Client) Flush() {
-	if c.muted {
-		return
+// flush flushes the closed Client's buffer.
+func (c *Client) flush() {
+	if !c.muted || c.conn.closed {
+		c.conn.flush(0)
 	}
-	c.conn.mu.Lock()
-	c.conn.flush(0)
-	c.conn.mu.Unlock()
 }
 
 // Close flushes the Client's buffer and releases the associated ressources. The
@@ -157,9 +162,5 @@ func (c *Client) Close() {
 	if c.muted {
 		return
 	}
-	c.conn.mu.Lock()
-	c.conn.flush(0)
-	c.conn.handleError(c.conn.w.Close())
 	c.conn.closed = true
-	c.conn.mu.Unlock()
 }

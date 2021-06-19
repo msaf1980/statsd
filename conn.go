@@ -1,12 +1,15 @@
 package statsd
 
 import (
+	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"net"
 	"strconv"
-	"sync"
 	"time"
+
+	lockfree_queue "github.com/msaf1980/go-lockfree-queue"
 )
 
 type conn struct {
@@ -16,10 +19,11 @@ type conn struct {
 	timeout       time.Duration
 	flushPeriod   time.Duration
 	maxPacketSize int
+	maxQueued     int
 	network       string
 	tagFormat     TagFormat
 
-	mu sync.Mutex
+	q *lockfree_queue.Queue
 	// Fields guarded by the mutex.
 	closed    bool
 	w         io.WriteCloser
@@ -34,9 +38,12 @@ func newConn(conf connConfig, muted bool) (*conn, error) {
 		timeout:       5 * time.Second,
 		flushPeriod:   conf.FlushPeriod,
 		maxPacketSize: conf.MaxPacketSize,
+		maxQueued:     1024,
 		network:       conf.Network,
 		tagFormat:     conf.TagFormat,
 	}
+
+	c.q = lockfree_queue.NewQueue(c.maxQueued)
 
 	if muted {
 		return c, nil
@@ -55,14 +62,15 @@ func newConn(conf connConfig, muted bool) (*conn, error) {
 		go func() {
 			ticker := time.NewTicker(c.flushPeriod)
 			for _ = range ticker.C {
-				c.mu.Lock()
+				c.flush(0)
 				if c.closed {
+					if c.w != nil {
+						err := c.w.Close()
+						c.errorHandler(err)
+					}
 					ticker.Stop()
-					c.mu.Unlock()
 					return
 				}
-				c.flush(0)
-				c.mu.Unlock()
 			}
 		}()
 	}
@@ -91,21 +99,68 @@ func (c *conn) dial() error {
 	return nil
 }
 
+func (c *conn) Put(m *Metric) error {
+	if !c.q.Put(m) {
+		// drop last two elements and try put again
+		c.q.Get()
+		c.q.Get()
+		c.q.Put(m)
+	}
+	return nil
+}
+
+func (c *conn) Get() (bool, error) {
+	metric, _ := c.q.Get()
+	if metric != nil {
+		l := len(c.buf)
+		m := metric.(*Metric)
+		switch m.Type {
+		case COUNT:
+			c.metric(m.Prefix, m.Bucket, m.Value, COUNT_S, m.Rate, m.Tags)
+		case GAUGE:
+			c.gauge(m.Prefix, m.Bucket, m.Value, m.Tags)
+		case TIMINGS:
+			c.metric(m.Prefix, m.Bucket, m.Value, TIMINGS_S, m.Rate, m.Tags)
+		case HISTOGRAM:
+			c.metric(m.Prefix, m.Bucket, m.Value, HISTOGRAM_S, m.Rate, m.Tags)
+		default:
+			c.errorHandler(fmt.Errorf("unknown metric type: %d", m.Type))
+		}
+		return true, c.flushIfBufferFull(l)
+	}
+	return false, nil
+}
+
+func (c *conn) getNoFlush() bool {
+	metric, _ := c.q.Get()
+	if metric != nil {
+		m := metric.(*Metric)
+		switch m.Type {
+		case COUNT:
+			c.metric(m.Prefix, m.Bucket, m.Value, COUNT_S, m.Rate, m.Tags)
+		case GAUGE:
+			c.gauge(m.Prefix, m.Bucket, m.Value, m.Tags)
+		case TIMINGS:
+			c.metric(m.Prefix, m.Bucket, m.Value, TIMINGS_S, m.Rate, m.Tags)
+		case HISTOGRAM:
+			c.metric(m.Prefix, m.Bucket, m.Value, HISTOGRAM_S, m.Rate, m.Tags)
+		default:
+			return false
+		}
+		return true
+	}
+	return false
+}
+
 func (c *conn) metric(prefix, bucket string, n interface{}, typ string, rate float32, tags string) {
-	c.mu.Lock()
-	l := len(c.buf)
 	c.appendBucket(prefix, bucket, tags)
 	c.appendNumber(n)
 	c.appendType(typ)
 	c.appendRate(rate)
 	c.closeMetric(tags)
-	c.flushIfBufferFull(l)
-	c.mu.Unlock()
 }
 
 func (c *conn) gauge(prefix, bucket string, value interface{}, tags string) {
-	c.mu.Lock()
-	l := len(c.buf)
 	// To set a gauge to a negative value we must first set it to 0.
 	// https://github.com/etsy/statsd/blob/master/docs/metric_types.md#gauges
 	if isNegative(value) {
@@ -114,8 +169,6 @@ func (c *conn) gauge(prefix, bucket string, value interface{}, tags string) {
 	}
 	c.appendBucket(prefix, bucket, tags)
 	c.appendGauge(value, tags)
-	c.flushIfBufferFull(l)
-	c.mu.Unlock()
 }
 
 func (c *conn) appendGauge(value interface{}, tags string) {
@@ -125,14 +178,10 @@ func (c *conn) appendGauge(value interface{}, tags string) {
 }
 
 func (c *conn) unique(prefix, bucket string, value string, tags string) {
-	c.mu.Lock()
-	l := len(c.buf)
 	c.appendBucket(prefix, bucket, tags)
 	c.appendString(value)
 	c.appendType(SET_S)
 	c.closeMetric(tags)
-	c.flushIfBufferFull(l)
-	c.mu.Unlock()
 }
 
 func (c *conn) appendByte(b byte) {
@@ -240,20 +289,45 @@ func (c *conn) closeMetric(tags string) {
 	c.appendByte('\n')
 }
 
-func (c *conn) flushIfBufferFull(lastSafeLen int) {
-	if len(c.buf) > c.maxPacketSize {
-		c.flush(lastSafeLen)
-	}
+func (c *conn) reset(n int) {
+	c.buf = c.buf[0:n]
 }
 
-// flush flushes the first n bytes of the buffer.
+func (c *conn) flushBuffer(n int) error {
+	// Trim the last \n, StatsD does not like it.
+	if n == 0 || n > len(c.buf) {
+		n = len(c.buf)
+	}
+	if n == 0 {
+		return nil
+	}
+	var err error
+	if c.w != nil {
+		_, err = c.w.Write(c.buf[:n-1])
+		c.handleError(err)
+	}
+	if n < len(c.buf) {
+		copy(c.buf, c.buf[n:])
+	}
+	c.reset(len(c.buf) - n)
+	return err
+}
+
+func (c *conn) flushIfBufferFull(lastSafeLen int) error {
+	if len(c.buf) > c.maxPacketSize {
+		return c.flushBuffer(lastSafeLen)
+	}
+	return nil
+}
+
+// flush flushes the first n metrics from the queue.
 // If n is 0, the whole buffer is flushed.
 func (c *conn) flush(n int) {
-	if len(c.buf) == 0 {
+	if c.q.Size() == 0 {
 		return
 	}
 	if n == 0 {
-		n = len(c.buf)
+		n = math.MaxInt32
 	}
 
 	if c.w == nil {
@@ -263,13 +337,17 @@ func (c *conn) flush(n int) {
 		}
 	}
 
-	// Trim the last \n, StatsD does not like it.
-	_, err := c.w.Write(c.buf[:n-1])
-	c.handleError(err)
-	if n < len(c.buf) {
-		copy(c.buf, c.buf[n:])
+	for n > 0 {
+		ok, err := c.Get()
+		c.errorHandler(err)
+		if err != nil {
+			return
+		} else if !ok {
+			break
+		}
+		n--
 	}
-	c.buf = c.buf[:len(c.buf)-n]
+	c.flushBuffer(0)
 }
 
 func (c *conn) handleError(err error) {

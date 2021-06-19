@@ -1,0 +1,6 @@
+github.com/msaf1980/go-lockfree-queue v0.0.0-20200822061714-35c92fde4d45 h1:9UFDIePmWJsa6gN5iu1g+Kjx8pmqbjTaJK/CVIm/8Co=
+github.com/msaf1980/go-lockfree-queue v0.0.0-20200822061714-35c92fde4d45/go.mod h1:fyMgmfpc9pa8MU7SeNI9uyUJzT77obSU9Id9h6jrGxU=
+github.com/msaf1980/go-stringutils v0.0.5 h1:iby7NkuCt+jtUaKEhIVk+3u+ZDPebu0+580k6WEmcnY=
+github.com/msaf1980/go-stringutils v0.0.5/go.mod h1:OZNAlelKBdQ0KWGaGwtd3JPDrvLXDt6PBps/Pr3ERcA=
+gopkg.in/alexcesaro/statsd.v2 v2.0.0 h1:FXkZSCZIH17vLCO5sO2UucTHsH9pc+17F6pl3JVCwMc=
+gopkg.in/alexcesaro/statsd.v2 v2.0.0/go.mod h1:i0ubccKGzBVNBpdGV5MocxyA/XlLUJzA7SLonnE4drU=

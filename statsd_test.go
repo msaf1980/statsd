@@ -16,6 +16,7 @@ import (
 const (
 	testAddr = ":0"
 	testKey  = "test_key"
+	testKey2 = "test_key2"
 )
 
 var testDate = time.Date(2015, 10, 22, 16, 53, 0, 0, time.UTC)
@@ -137,7 +138,6 @@ func TestMute(t *testing.T) {
 	c.Timing(testKey, 1)
 	c.Histogram(testKey, 1)
 	c.Unique(testKey, "1")
-	c.Flush()
 	c.Close()
 }
 
@@ -207,22 +207,22 @@ func TestErrorHandler(t *testing.T) {
 	testClient(t, func(c *Client) {
 		getBuffer(c).err = errors.New("test error")
 		c.Increment(testKey)
+		c.flush()
 		c.Close()
-		if errorCount != 2 {
-			t.Errorf("Wrong error count, got %d, want 2", errorCount)
+		if errorCount < 1 {
+			t.Errorf("Wrong error count, got %d, want > 0", errorCount)
 		}
 	}, ErrorHandler(func(err error) {
-		if err == nil {
-			t.Error("Error should not be nil")
+		if err != nil {
+			errorCount++
 		}
-		errorCount++
 	}))
 }
 
 func TestFlush(t *testing.T) {
 	testClient(t, func(c *Client) {
 		c.Increment(testKey)
-		c.Flush()
+		c.flush()
 		got := getOutput(c)
 		want := "test_key:1|c"
 		if got != want {
@@ -236,13 +236,11 @@ func TestFlushPeriod(t *testing.T) {
 	testClient(t, func(c *Client) {
 		c.Increment(testKey)
 		time.Sleep(time.Millisecond)
-		c.conn.mu.Lock()
 		got := getOutput(c)
 		want := "test_key:1|c"
 		if got != want {
 			t.Errorf("Invalid output, got %q, want %q", got, want)
 		}
-		c.conn.mu.Unlock()
 		c.Close()
 	}, FlushPeriod(time.Nanosecond))
 }
@@ -250,21 +248,20 @@ func TestFlushPeriod(t *testing.T) {
 func TestMaxPacketSize(t *testing.T) {
 	testClient(t, func(c *Client) {
 		c.Increment(testKey)
+		c.flush()
 		conn := getBuffer(c)
 		got := conn.buf.String()
-		if got != "" {
-			t.Errorf("Output should be empty, got %q", got)
-		}
-
-		c.Increment(testKey)
-		got = conn.buf.String()
 		want := "test_key:1|c"
 		if got != want {
 			t.Errorf("Invalid output, got %q, want %q", got, want)
 		}
+
 		conn.buf.Reset()
 		c.Close()
 
+		c.Increment(testKey)
+		c.flush()
+		want = "test_key:1|c"
 		got = conn.buf.String()
 		if got != want {
 			t.Errorf("Invalid output, got %q, want %q", got, want)
@@ -422,7 +419,10 @@ func testOutput(t *testing.T, want string, f func(*Client), options ...Option) {
 		f(c)
 		c.Close()
 
-		got := getOutput(c)
+		flushQueueToBuf(c)
+		//got := getOutput(c)
+		got := getOutputFromBuf(c)
+
 		if got != want {
 			t.Errorf("Invalid output, got:\n%q\nwant:\n%q", got, want)
 		}
@@ -444,7 +444,9 @@ func testOutputConcurrent(t *testing.T, want []string, f func(*Client), options 
 
 func expectNoError(t *testing.T) func(error) {
 	return func(err error) {
-		t.Errorf("ErrorHandler should not receive an error: %v", err)
+		if err != nil {
+			t.Errorf("ErrorHandler should not receive an error: %v", err)
+		}
 	}
 }
 
@@ -479,6 +481,18 @@ func getOutput(c *Client) string {
 	return getBuffer(c).buf.String()
 }
 
+func flushQueueToBuf(c *Client) {
+	for c.conn.getNoFlush() {
+	}
+}
+
+func getOutputFromBuf(c *Client) string {
+	if len(c.conn.buf) == 0 {
+		return ""
+	}
+	return string(c.conn.buf[:len(c.conn.buf)-1])
+}
+
 func mockDial(string, string, time.Duration) (net.Conn, error) {
 	return &testBuffer{}, nil
 }
@@ -511,11 +525,13 @@ func testNetwork(t *testing.T, network string) {
 		t.Fatalf("New: %v", err)
 	}
 	c.Increment(testKey)
+	time.Sleep(2 * c.conn.flushPeriod)
 	c.Close()
 	select {
-	case <-time.After(100 * time.Millisecond):
-		t.Error("server received nothing after 100ms")
+	case <-time.After(2 * c.conn.flushPeriod):
+		t.Errorf("server received nothing after %v", c.conn.flushPeriod)
 	case <-received:
+		break
 	}
 }
 

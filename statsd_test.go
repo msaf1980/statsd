@@ -586,3 +586,32 @@ func Benchmark(b *testing.B) {
 	c.Close()
 	serv.Close()
 }
+
+func BenchmarkParallel4(b *testing.B) {
+	n := 4
+	serv := newServer(b, "udp", testAddr, func([]byte) {})
+	c, err := New(Address(serv.addr), FlushPeriod(0))
+	if err != nil {
+		b.Fatal(err)
+	}
+	for i := 0; i < b.N; i++ {
+		wg := &sync.WaitGroup{}
+		wg.Add(n)
+		starter := make(chan struct{})
+		for j := 0; j < n; j++ {
+			go func() {
+				<-starter
+				c.Increment(testKey)
+				c.Count(testKey, i)
+				c.Gauge(testKey, i)
+				c.Timing(testKey, i)
+				c.NewTiming().Send(testKey)
+				wg.Done()
+			}()
+		}
+		close(starter)
+		wg.Wait()
+	}
+	c.Close()
+	serv.Close()
+}

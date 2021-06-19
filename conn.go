@@ -13,6 +13,7 @@ type conn struct {
 	// Fields settable with options at Client's creation.
 	addr          string
 	errorHandler  func(error)
+	timeout       time.Duration
 	flushPeriod   time.Duration
 	maxPacketSize int
 	network       string
@@ -30,6 +31,7 @@ func newConn(conf connConfig, muted bool) (*conn, error) {
 	c := &conn{
 		addr:          conf.Addr,
 		errorHandler:  conf.ErrorHandler,
+		timeout:       5 * time.Second,
 		flushPeriod:   conf.FlushPeriod,
 		maxPacketSize: conf.MaxPacketSize,
 		network:       conf.Network,
@@ -41,22 +43,9 @@ func newConn(conf connConfig, muted bool) (*conn, error) {
 	}
 
 	var err error
-	c.w, err = dialTimeout(c.network, c.addr, 5*time.Second)
-	if err != nil {
-		return c, err
-	}
-	// When using UDP do a quick check to see if something is listening on the
-	// given port to return an error as soon as possible.
-	if c.network[:3] == "udp" {
-		for i := 0; i < 2; i++ {
-			_, err = c.w.Write(nil)
-			if err != nil {
-				_ = c.w.Close()
-				c.w = nil
-				return c, err
-			}
-		}
-	}
+
+	err = c.dial()
+	c.handleError(err)
 
 	// To prevent a buffer overflow add some capacity to the buffer to allow for
 	// an additional metric.
@@ -78,7 +67,28 @@ func newConn(conf connConfig, muted bool) (*conn, error) {
 		}()
 	}
 
-	return c, nil
+	return c, err
+}
+
+func (c *conn) dial() error {
+	var err error
+	c.w, err = dialTimeout(c.network, c.addr, c.timeout)
+	if err != nil {
+		return err
+	}
+	// When using UDP do a quick check to see if something is listening on the
+	// given port to return an error as soon as possible.
+	if c.network[:3] == "udp" {
+		for i := 0; i < 2; i++ {
+			_, err = c.w.Write(nil)
+			if err != nil {
+				_ = c.w.Close()
+				c.w = nil
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (c *conn) metric(prefix, bucket string, n interface{}, typ string, rate float32, tags string) {
@@ -245,6 +255,13 @@ func (c *conn) flush(n int) {
 	}
 	if n == 0 {
 		n = len(c.buf)
+	}
+
+	if c.w == nil {
+		if err := c.dial(); err != nil {
+			c.errorHandler(err)
+			return
+		}
 	}
 
 	// Trim the last \n, StatsD does not like it.

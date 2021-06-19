@@ -11,7 +11,7 @@ type Client struct {
 	tags   string
 }
 
-// New returns a new Client.
+// New returns a new Client  (error is connection error and might be temporary)
 func New(opts ...Option) (*Client, error) {
 	// The default configuration.
 	conf := &config{
@@ -36,14 +36,10 @@ func New(opts ...Option) (*Client, error) {
 		conn:  conn,
 		muted: conf.Client.Muted,
 	}
-	if err != nil {
-		c.muted = true
-		return c, err
-	}
 	c.rate = conf.Client.Rate
 	c.prefix = conf.Client.Prefix
 	c.tags = joinTags(conf.Conn.TagFormat, conf.Client.Tags)
-	return c, nil
+	return c, err
 }
 
 // Clone returns a clone of the Client. The cloned Client inherits its

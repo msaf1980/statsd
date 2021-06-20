@@ -1,5 +1,7 @@
 package statsd
 
+import "sync"
+
 type Type uint8
 
 const (
@@ -24,4 +26,16 @@ type Metric struct {
 	Tags   string
 	Value  interface{}
 	Rate   float32
+}
+
+var metricPool = sync.Pool{
+	New: func() interface{} { return new(Metric) },
+}
+
+func (m *Metric) Reset() {
+	m.Bucket = ""
+	m.Prefix = ""
+	m.Tags = ""
+	m.Value = 0
+	metricPool.Put(m)
 }

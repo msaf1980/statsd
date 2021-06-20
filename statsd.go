@@ -77,7 +77,13 @@ func (c *Client) Count(bucket string, value interface{}) error {
 		return nil
 	}
 	//c.conn.metric(c.prefix, bucket, n, COUNT_S, c.rate, c.tags)
-	m := &Metric{Type: COUNT, Prefix: c.prefix, Bucket: bucket, Tags: c.tags, Value: value, Rate: c.rate}
+	m := metricPool.New().(*Metric)
+	m.Type = COUNT
+	m.Prefix = c.prefix
+	m.Bucket = bucket
+	m.Tags = c.tags
+	m.Value = value
+	m.Rate = c.rate
 	return c.conn.Put(m)
 }
 
@@ -96,7 +102,12 @@ func (c *Client) Gauge(bucket string, value interface{}) error {
 		return nil
 	}
 	//c.conn.gauge(c.prefix, bucket, value, c.tags)
-	m := &Metric{Type: GAUGE, Prefix: c.prefix, Bucket: bucket, Tags: c.tags, Value: value}
+	m := metricPool.New().(*Metric)
+	m.Type = GAUGE
+	m.Prefix = c.prefix
+	m.Bucket = bucket
+	m.Tags = c.tags
+	m.Value = value
 	return c.conn.Put(m)
 }
 
@@ -106,7 +117,13 @@ func (c *Client) Timing(bucket string, value interface{}) error {
 		return nil
 	}
 	//c.conn.metric(c.prefix, bucket, value, TIMINGS_S, c.rate, c.tags)
-	m := &Metric{Type: TIMINGS, Prefix: c.prefix, Bucket: bucket, Tags: c.tags, Value: value, Rate: c.rate}
+	m := metricPool.New().(*Metric)
+	m.Type = TIMINGS
+	m.Prefix = c.prefix
+	m.Bucket = bucket
+	m.Tags = c.tags
+	m.Value = value
+	m.Rate = c.rate
 	return c.conn.Put(m)
 }
 
@@ -116,7 +133,13 @@ func (c *Client) Histogram(bucket string, value interface{}) error {
 		return nil
 	}
 	//c.conn.metric(c.prefix, bucket, value, HISTOGRAM_S, c.rate, c.tags)
-	m := &Metric{Type: HISTOGRAM, Prefix: c.prefix, Bucket: bucket, Tags: c.tags, Value: value, Rate: c.rate}
+	m := metricPool.New().(*Metric)
+	m.Type = HISTOGRAM
+	m.Prefix = c.prefix
+	m.Bucket = bucket
+	m.Tags = c.tags
+	m.Value = value
+	m.Rate = c.rate
 	return c.conn.Put(m)
 }
 

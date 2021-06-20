@@ -126,6 +126,7 @@ func (c *conn) Get() (bool, error) {
 		default:
 			c.errorHandler(fmt.Errorf("unknown metric type: %d", m.Type))
 		}
+		m.Reset() /* put back in metricPool */
 		return true, c.flushIfBufferFull(l)
 	}
 	return false, nil
@@ -144,9 +145,8 @@ func (c *conn) getNoFlush() bool {
 			c.metric(m.Prefix, m.Bucket, m.Value, TIMINGS_S, m.Rate, m.Tags)
 		case HISTOGRAM:
 			c.metric(m.Prefix, m.Bucket, m.Value, HISTOGRAM_S, m.Rate, m.Tags)
-		default:
-			return false
 		}
+		m.Reset() /* put back in metricPool */
 		return true
 	}
 	return false

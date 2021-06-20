@@ -6,14 +6,6 @@ import (
 	"time"
 )
 
-var (
-	COUNT_S     = "|c"
-	GAUGE_S     = "|g"
-	TIMINGS_S   = "|ms"
-	HISTOGRAM_S = "|h"
-	SET_S       = "|s"
-)
-
 type config struct {
 	Conn   connConfig
 	Client clientConfig

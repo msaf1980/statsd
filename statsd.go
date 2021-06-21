@@ -21,11 +21,15 @@ func New(opts ...Option) (*Client, error) {
 		Conn: connConfig{
 			Addr:        ":8125",
 			FlushPeriod: 100 * time.Millisecond,
-			// Worst-case scenario:
-			// Ethernet MTU - IPv6 Header - TCP Header = 1500 - 40 - 20 = 1440
-			MaxPacketSize: 1440,
-			Network:       "udp",
+			Network:     "udp",
 		},
+	}
+	// Worst-case scenario:
+	// Ethernet MTU - IPv6 Header - TCP Header = 1500 - 40 - 20 = 1440
+	if conf.Conn.Network == "udp" {
+		conf.Conn.MaxPacketSize = 1000
+	} else {
+		conf.Conn.MaxPacketSize = 1440
 	}
 	for _, o := range opts {
 		o(conf)

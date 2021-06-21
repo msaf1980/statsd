@@ -22,6 +22,7 @@ type connConfig struct {
 	Addr          string
 	ErrorHandler  func(error)
 	FlushPeriod   time.Duration
+	Timeout       time.Duration
 	MaxPacketSize int
 	Network       string
 	TagFormat     TagFormat
@@ -37,6 +38,15 @@ type Option func(*config)
 func Address(addr string) Option {
 	return Option(func(c *config) {
 		c.Conn.Addr = addr
+	})
+}
+
+// Timeout for connect/write to the StatsD daemon.
+//
+// By default, "5s" is used. This option is ignored in Client.Clone().
+func Timeout(timeout time.Duration) Option {
+	return Option(func(c *config) {
+		c.Conn.Timeout = timeout
 	})
 }
 

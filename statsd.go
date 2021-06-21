@@ -22,6 +22,7 @@ func New(opts ...Option) (*Client, error) {
 			Addr:        ":8125",
 			FlushPeriod: 100 * time.Millisecond,
 			Network:     "udp",
+			Timeout:     5 * time.Second,
 		},
 	}
 	// Worst-case scenario:
@@ -146,24 +147,39 @@ func (c *Client) Unique(bucket string, value string) {
 }
 
 // Flush flushes the Client's buffer.
-func (c *Client) Flush() {
+func (c *Client) Flush() error {
 	if c.muted {
-		return
+		return nil
 	}
 	c.conn.mu.Lock()
-	c.conn.flush(0)
+	err := c.conn.flush(0)
+	if err != nil {
+		c.conn.handleError(err)
+	} else {
+		err = c.conn.w.Close()
+		c.conn.handleError(err)
+	}
 	c.conn.mu.Unlock()
+
+	return err
 }
 
 // Close flushes the Client's buffer and releases the associated ressources. The
 // Client and all the cloned Clients must not be used afterward.
-func (c *Client) Close() {
+func (c *Client) Close() error {
 	if c.muted {
-		return
+		return nil
 	}
 	c.conn.mu.Lock()
-	c.conn.flush(0)
-	c.conn.handleError(c.conn.w.Close())
+	err := c.conn.flush(0)
+	if err != nil {
+		c.conn.handleError(err)
+	} else if c.conn.w != nil {
+		err = c.conn.w.Close()
+		c.conn.handleError(err)
+	}
 	c.conn.closed = true
 	c.conn.mu.Unlock()
+
+	return err
 }

@@ -9,6 +9,14 @@ import (
 	"time"
 )
 
+type WriteCloserWithTimeout interface {
+	io.WriteCloser
+
+	SetDeadline(time.Time) error
+	SetReadDeadline(time.Time) error
+	SetWriteDeadline(time.Time) error
+}
+
 type conn struct {
 	// Fields settable with options at Client's creation.
 	addr          string
@@ -23,7 +31,7 @@ type conn struct {
 	mu sync.Mutex
 	// Fields guarded by the mutex.
 	closed    bool
-	w         io.WriteCloser
+	w         WriteCloserWithTimeout
 	buf       []byte
 	rateCache map[float32]string
 }
@@ -32,7 +40,7 @@ func newConn(conf connConfig, muted bool) (*conn, error) {
 	c := &conn{
 		addr:          conf.Addr,
 		errorHandler:  conf.ErrorHandler,
-		timeout:       5 * time.Second,
+		timeout:       conf.Timeout,
 		flushPeriod:   conf.FlushPeriod,
 		maxPacketSize: conf.MaxPacketSize,
 		network:       conf.Network,
@@ -85,6 +93,9 @@ func (c *conn) dial() error {
 	// given port to return an error as soon as possible.
 	if c.network[:3] == "udp" {
 		for i := 0; i < 2; i++ {
+			if c.timeout > 0 {
+				c.w.SetDeadline(time.Now().Add(c.timeout))
+			}
 			_, err = c.w.Write(nil)
 			if err != nil {
 				_ = c.w.Close()
@@ -253,9 +264,9 @@ func (c *conn) flushIfBufferFull(lastSafeLen int) {
 
 // flush flushes the first n bytes of the buffer.
 // If n is 0, the whole buffer is flushed.
-func (c *conn) flush(n int) {
+func (c *conn) flush(n int) error {
 	if len(c.buf) == 0 {
-		return
+		return nil
 	}
 	if n == 0 {
 		n = len(c.buf)
@@ -264,11 +275,14 @@ func (c *conn) flush(n int) {
 	if c.w == nil {
 		if err := c.dial(); err != nil {
 			c.errorHandler(err)
-			return
+			return err
 		}
 	}
 
 	var err error
+	if c.timeout > 0 {
+		c.w.SetDeadline(time.Now().Add(c.timeout))
+	}
 	if c.sendLastEndl {
 		// Don't trim the last \n, becouse persistent connection
 		_, err = c.w.Write(c.buf[:n])
@@ -276,11 +290,17 @@ func (c *conn) flush(n int) {
 		// Trim the last \n, StatsD does not like it.
 		_, err = c.w.Write(c.buf[:n-1])
 	}
-	c.handleError(err)
+	if err != nil {
+		c.handleError(err)
+		c.w.Close()
+		c.w = nil
+	}
 	if n < len(c.buf) {
 		copy(c.buf, c.buf[n:])
 	}
 	c.buf = c.buf[:len(c.buf)-n]
+
+	return err
 }
 
 func (c *conn) handleError(err error) {

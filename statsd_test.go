@@ -348,6 +348,20 @@ func TestDialError(t *testing.T) {
 	}
 }
 
+func TestTimeoutOption(t *testing.T) {
+	{
+		c, err := New(
+			Timeout(100 * time.Millisecond),
+		)
+		if c == nil {
+			t.Fatalf("New: %v", err)
+		}
+		if c.conn.timeout != 100*time.Millisecond {
+			t.Errorf("Client timeout set to %v, want %v", c.conn.timeout, 100*time.Millisecond)
+		}
+		c.Close()
+	}
+}
 func TestConcurrency(t *testing.T) {
 	testKeys := []string{"test_key1", "test_key", "test_key_2", "test_key5", "test_key_03", "test_key_004"}
 	testOutputConcurrent(t, testKeys, func(c *Client) {
@@ -397,6 +411,10 @@ func (c *mockClosedUDPConn) Write(p []byte) (int, error) {
 func (c *mockClosedUDPConn) Close() error {
 	return nil
 }
+
+func (c *mockClosedUDPConn) SetDeadline(time.Time) error      { return nil }
+func (c *mockClosedUDPConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *mockClosedUDPConn) SetWriteDeadline(time.Time) error { return nil }
 
 func mockUDPClosed(string, string, time.Duration) (net.Conn, error) {
 	return &mockClosedUDPConn{}, nil
@@ -465,6 +483,10 @@ func (c *testBuffer) Write(p []byte) (int, error) {
 func (c *testBuffer) Close() error {
 	return c.err
 }
+
+func (c *testBuffer) SetDeadline(time.Time) error      { return nil }
+func (c *testBuffer) SetReadDeadline(time.Time) error  { return nil }
+func (c *testBuffer) SetWriteDeadline(time.Time) error { return nil }
 
 func getBuffer(c *Client) *testBuffer {
 	if mock, ok := c.conn.w.(*testBuffer); ok {

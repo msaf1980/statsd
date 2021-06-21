@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -484,21 +485,36 @@ func mockDial(string, string, time.Duration) (net.Conn, error) {
 }
 
 func TestUDP(t *testing.T) {
-	testNetwork(t, "udp")
+	testNetwork(t, "udp", 1)
 }
 
 func TestTCP(t *testing.T) {
-	testNetwork(t, "tcp")
+	testNetwork(t, "tcp", 1)
 }
 
-func testNetwork(t *testing.T, network string) {
+func TestTCPMulti(t *testing.T) {
+	testNetwork(t, "tcp", 1000)
+}
+
+func testNetwork(t *testing.T, network string, n int32) {
 	received := make(chan bool)
+	count := n
+	send := n
 	server := newServer(t, network, testAddr, func(p []byte) {
-		s := string(p)
-		if s != "test_key:1|c" {
-			t.Errorf("invalid output: %q", s)
+		s := strings.Split(string(p), "\n")
+		l := len(s)
+		if l > 0 && len(s[l-1]) == 0 {
+			l--
 		}
-		received <- true
+		for j := 0; j < l; j++ {
+			if s[j] != "test_key:1|c" {
+				t.Errorf("invalid output [%d of %d]: %q", j, len(s), s[j])
+			}
+		}
+		i := atomic.AddInt32(&count, -int32(l))
+		if i == 0 {
+			received <- true
+		}
 	})
 	defer server.Close()
 
@@ -510,11 +526,14 @@ func testNetwork(t *testing.T, network string) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	c.Increment(testKey)
+	for send > 0 {
+		c.Increment(testKey)
+		send--
+	}
 	c.Close()
 	select {
 	case <-time.After(100 * time.Millisecond):
-		t.Error("server received nothing after 100ms")
+		t.Errorf("server received nothing after 100ms, total received: %d of %d", n-count, n)
 	case <-received:
 	}
 }
@@ -591,9 +610,26 @@ func (s *server) Close() {
 	<-s.closed
 }
 
-func Benchmark(b *testing.B) {
+func BenchmarkNoBgFlush(b *testing.B) {
 	serv := newServer(b, "udp", testAddr, func([]byte) {})
 	c, err := New(Address(serv.addr), FlushPeriod(0))
+	if err != nil {
+		b.Fatal(err)
+	}
+	for i := 0; i < b.N; i++ {
+		c.Increment(testKey)
+		c.Count(testKey, i)
+		c.Gauge(testKey, i)
+		c.Timing(testKey, i)
+		c.NewTiming().Send(testKey)
+	}
+	c.Close()
+	serv.Close()
+}
+
+func BenchmarkBgFlush(b *testing.B) {
+	serv := newServer(b, "udp", testAddr, func([]byte) {})
+	c, err := New(Address(serv.addr))
 	if err != nil {
 		b.Fatal(err)
 	}

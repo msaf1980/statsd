@@ -18,6 +18,7 @@ type conn struct {
 	maxPacketSize int
 	network       string
 	tagFormat     TagFormat
+	sendLastEndl  bool
 
 	mu sync.Mutex
 	// Fields guarded by the mutex.
@@ -36,6 +37,10 @@ func newConn(conf connConfig, muted bool) (*conn, error) {
 		maxPacketSize: conf.MaxPacketSize,
 		network:       conf.Network,
 		tagFormat:     conf.TagFormat,
+	}
+
+	if c.network[:3] != "udp" {
+		c.sendLastEndl = true
 	}
 
 	if muted {
@@ -263,8 +268,14 @@ func (c *conn) flush(n int) {
 		}
 	}
 
-	// Trim the last \n, StatsD does not like it.
-	_, err := c.w.Write(c.buf[:n-1])
+	var err error
+	if c.sendLastEndl {
+		// Don't trim the last \n, becouse persistent connection
+		_, err = c.w.Write(c.buf[:n])
+	} else {
+		// Trim the last \n, StatsD does not like it.
+		_, err = c.w.Write(c.buf[:n-1])
+	}
 	c.handleError(err)
 	if n < len(c.buf) {
 		copy(c.buf, c.buf[n:])

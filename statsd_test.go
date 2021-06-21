@@ -492,6 +492,10 @@ func TestTCP(t *testing.T) {
 	testNetwork(t, "tcp", 1)
 }
 
+func TestUDPMulti(t *testing.T) {
+	testNetwork(t, "udp", 1000)
+}
+
 func TestTCPMulti(t *testing.T) {
 	testNetwork(t, "tcp", 1000)
 }

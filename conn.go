@@ -88,10 +88,10 @@ func newConn(conf connConfig, muted bool) (*conn, error) {
 		c.closeChan = make(chan bool)
 		c.flushChan = make(chan int32, 2)
 		go func() {
-			timer := time.NewTimer(c.flushPeriod)
+			ticker := time.NewTicker(c.flushPeriod)
 			for {
 				select {
-				case <-timer.C:
+				case <-ticker.C:
 					if !c.closed {
 						bufNum := c.switchBufUnlocked()
 						c.flush(0, bufNum)

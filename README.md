@@ -1,10 +1,10 @@
 # statsd
-[![Build Status](https://travis-ci.org/alexcesaro/statsd.svg?branch=v2)](https://travis-ci.org/alexcesaro/statsd) [![Code Coverage](http://gocover.io/_badge/gopkg.in/alexcesaro/statsd.v2)](http://gocover.io/gopkg.in/alexcesaro/statsd.v2) [![Documentation](https://godoc.org/gopkg.in/alexcesaro/statsd.v2?status.svg)](https://godoc.org/gopkg.in/alexcesaro/statsd.v2)
+
 
 ## Introduction
 
 statsd is a simple and efficient [Statsd](https://github.com/etsy/statsd)
-client.
+client, based on https://github.com/alexcesaro/stats.
 
 See the [benchmark](https://github.com/alexcesaro/statsdbench) for a comparison
 with other Go StatsD clients.
@@ -14,10 +14,8 @@ with other Go StatsD clients.
 - Supports all StatsD metrics: counter, gauge, timing and set
 - Supports InfluxDB and Datadog tags
 - Fast and GC-friendly: all functions for sending metrics do not allocate
-- Efficient: metrics are buffered by default
+- Efficient: metrics are buffered by default (when buffrend, all send in background flusher goroutine)
 - Simple and clean API
-- 100% test coverage
-- Versioned API using gopkg.in
 
 
 ## Documentation
@@ -27,7 +25,7 @@ https://godoc.org/gopkg.in/alexcesaro/statsd.v2
 
 ## Download
 
-    go get gopkg.in/alexcesaro/statsd.v2
+    go get github.com/msaf1980/stats
 
 
 ## Example

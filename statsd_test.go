@@ -12,14 +12,51 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 const (
 	testAddr = ":0"
 	testKey  = "test_key"
+	testKey2 = "test_key2"
 )
 
 var testDate = time.Date(2015, 10, 22, 16, 53, 0, 0, time.UTC)
+
+func TestLockAndSwichBuf(t *testing.T) {
+	serv := newServer(t, "udp", testAddr, func([]byte) {})
+	c, err := New(Address(serv.addr), FlushPeriod(0), MaxPacketSize(15))
+	if err != nil {
+		t.Fatalf("New() got error %v", err)
+	}
+
+	assert.Equal(t, int32(0), c.conn.activeBuf, "active buffer not as expected")
+
+	// lock for write
+	bufNum := c.conn.lockBuf()
+	assert.Equal(t, int32(0), bufNum, "locked buffer not as expected")
+	assert.Equal(t, c.conn.activeBuf, bufNum, "active buffer not as expected")
+	assert.Equal(t, c.conn.buf[bufNum].locked, BUF_LOCK_WRITE, "buffer not locked")
+
+	// release buffer after write
+	assert.True(t, c.conn.releaseBuf(bufNum), "release buffer failed")
+	assert.Equal(t, c.conn.activeBuf, bufNum, "active buffer not as expected")
+	assert.Equal(t, c.conn.buf[bufNum].locked, BUF_UNLOCKED, "buffer not unlocked")
+
+	// switch buffer
+	bufNum = c.conn.lockBuf()
+	assert.Equal(t, int32(0), bufNum, "locked buffer not as expected")
+	newBufNum := c.conn.switchBufNum(bufNum)
+	assert.Equal(t, int32(1), newBufNum, "switched buffer not as expected")
+	assert.Equal(t, c.conn.activeBuf, newBufNum, "active buffer not as expected")
+	assert.Equal(t, c.conn.buf[bufNum].locked, BUF_NEED_FLUSH, "buffer not need flushed")
+	assert.Equal(t, c.conn.buf[newBufNum].locked, BUF_UNLOCKED, "buffer not unlocked")
+
+	// release buffer after flush
+	assert.True(t, c.conn.releaseBufFlush(bufNum, 0), "release buffer failed")
+	assert.Equal(t, c.conn.buf[bufNum].locked, BUF_UNLOCKED, "buffer not unlocked")
+}
 
 func TestCount(t *testing.T) {
 	testOutput(t, "test_key:5|c", func(c *Client) {
@@ -237,13 +274,13 @@ func TestFlushPeriod(t *testing.T) {
 	testClient(t, func(c *Client) {
 		c.Increment(testKey)
 		time.Sleep(time.Millisecond)
-		c.conn.mu.Lock()
+		//c.conn.mu.Lock()
 		got := getOutput(c)
 		want := "test_key:1|c"
 		if got != want {
 			t.Errorf("Invalid output, got %q, want %q", got, want)
 		}
-		c.conn.mu.Unlock()
+		//c.conn.mu.Unlock()
 		c.Close()
 	}, FlushPeriod(time.Nanosecond))
 }
@@ -256,17 +293,29 @@ func TestMaxPacketSize(t *testing.T) {
 		if got != "" {
 			t.Errorf("Output should be empty, got %q", got)
 		}
+		got1 := string(c.conn.buf[0].data)
+		got2 := string(c.conn.buf[1].data)
+		assert.Equal(t, "test_key:1|c\n", got1, "Connection buffer #1 mismatch")
+		assert.Equal(t, "", got2, "Connection buffer #2 mismatch")
 
+		c.Increment(testKey2)
 		c.Increment(testKey)
+		time.Sleep(time.Millisecond)
+		got1 = string(c.conn.buf[0].data)
+		got2 = string(c.conn.buf[1].data)
 		got = conn.buf.String()
 		want := "test_key:1|c"
 		if got != want {
 			t.Errorf("Invalid output, got %q, want %q", got, want)
 		}
+		assert.Equal(t, "test_key2:1|c\n", got1, "Connection buffer #1 mismatch")
+		assert.Equal(t, "test_key:1|c\n", got2, "Connection buffer #2 mismatch")
+
 		conn.buf.Reset()
 		c.Close()
 
 		got = conn.buf.String()
+		want = "test_key:1|ctest_key2:1|c"
 		if got != want {
 			t.Errorf("Invalid output, got %q, want %q", got, want)
 		}
@@ -524,7 +573,7 @@ func TestTCPMulti(t *testing.T) {
 
 func testNetwork(t *testing.T, network string, n int32) {
 	received := make(chan bool)
-	count := n
+	count := int32(0)
 	send := n
 	server := newServer(t, network, testAddr, func(p []byte) {
 		s := strings.Split(string(p), "\n")
@@ -537,8 +586,8 @@ func testNetwork(t *testing.T, network string, n int32) {
 				t.Errorf("invalid output [%d of %d]: %q", j, len(s), s[j])
 			}
 		}
-		i := atomic.AddInt32(&count, -int32(l))
-		if i == 0 {
+		i := atomic.AddInt32(&count, int32(l))
+		if i == n {
 			received <- true
 		}
 	})
@@ -559,7 +608,7 @@ func testNetwork(t *testing.T, network string, n int32) {
 	c.Close()
 	select {
 	case <-time.After(100 * time.Millisecond):
-		t.Errorf("server received nothing after 100ms, total received: %d of %d", n-count, n)
+		t.Errorf("server received nothing after 100ms, total received: %d of %d", count, n)
 	case <-received:
 	}
 }
@@ -636,7 +685,7 @@ func (s *server) Close() {
 	<-s.closed
 }
 
-func BenchmarkNoBgFlush(b *testing.B) {
+func Benchmark_NoBgFlush(b *testing.B) {
 	serv := newServer(b, "udp", testAddr, func([]byte) {})
 	c, err := New(Address(serv.addr), FlushPeriod(0))
 	if err != nil {
@@ -653,7 +702,7 @@ func BenchmarkNoBgFlush(b *testing.B) {
 	serv.Close()
 }
 
-func BenchmarkBgFlush(b *testing.B) {
+func Benchmark_BgFlush(b *testing.B) {
 	serv := newServer(b, "udp", testAddr, func([]byte) {})
 	c, err := New(Address(serv.addr))
 	if err != nil {
@@ -670,10 +719,39 @@ func BenchmarkBgFlush(b *testing.B) {
 	serv.Close()
 }
 
-func BenchmarkParallel4(b *testing.B) {
+func BenchmarkParallel4_NoBgFlush(b *testing.B) {
 	n := 4
 	serv := newServer(b, "udp", testAddr, func([]byte) {})
 	c, err := New(Address(serv.addr), FlushPeriod(0))
+	if err != nil {
+		b.Fatal(err)
+	}
+	for i := 0; i < b.N; i++ {
+		wg := &sync.WaitGroup{}
+		wg.Add(n)
+		starter := make(chan struct{})
+		for j := 0; j < n; j++ {
+			go func() {
+				<-starter
+				c.Increment(testKey)
+				c.Count(testKey, i)
+				c.Gauge(testKey, i)
+				c.Timing(testKey, i)
+				c.NewTiming().Send(testKey)
+				wg.Done()
+			}()
+		}
+		close(starter)
+		wg.Wait()
+	}
+	c.Close()
+	serv.Close()
+}
+
+func BenchmarkParallel4_BgFlush(b *testing.B) {
+	n := 4
+	serv := newServer(b, "udp", testAddr, func([]byte) {})
+	c, err := New(Address(serv.addr))
 	if err != nil {
 		b.Fatal(err)
 	}

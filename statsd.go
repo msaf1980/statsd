@@ -151,17 +151,7 @@ func (c *Client) Flush() error {
 	if c.muted {
 		return nil
 	}
-	c.conn.mu.Lock()
-	err := c.conn.flush(0)
-	if err != nil {
-		c.conn.handleError(err)
-	} else {
-		err = c.conn.w.Close()
-		c.conn.handleError(err)
-	}
-	c.conn.mu.Unlock()
-
-	return err
+	return c.conn.Flush()
 }
 
 // Close flushes the Client's buffer and releases the associated ressources. The
@@ -170,16 +160,5 @@ func (c *Client) Close() error {
 	if c.muted {
 		return nil
 	}
-	c.conn.mu.Lock()
-	err := c.conn.flush(0)
-	if err != nil {
-		c.conn.handleError(err)
-	} else if c.conn.w != nil {
-		err = c.conn.w.Close()
-		c.conn.handleError(err)
-	}
-	c.conn.closed = true
-	c.conn.mu.Unlock()
-
-	return err
+	return c.conn.Close()
 }

@@ -93,6 +93,11 @@ func (c *Client) Increment(bucket string) {
 	c.Count(bucket, 1)
 }
 
+// Decrement decrement the given bucket. It is equivalent to Count(bucket, -1).
+func (c *Client) Decrement(bucket string) {
+	c.Count(bucket, -1)
+}
+
 // Gauge records an absolute value for the given bucket.
 func (c *Client) Gauge(bucket string, value interface{}) {
 	if c.skip() {

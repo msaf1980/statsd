@@ -33,6 +33,12 @@ func TestIncrement(t *testing.T) {
 	})
 }
 
+func TestDecrement(t *testing.T) {
+	testOutput(t, "test_key:-1|c", func(c *Client) {
+		c.Decrement(testKey)
+	})
+}
+
 func TestGauge(t *testing.T) {
 	testOutput(t, "test_key:5|g\ntest_key:0|g\ntest_key:-10|g", func(c *Client) {
 		c.Gauge(testKey, 5)
